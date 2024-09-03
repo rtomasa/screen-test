@@ -27,6 +27,8 @@
 #define FRAME_BUF_HEIGHT 240
 
 static uint16_t *frame_buf;
+static bool is_50hz = false;
+static bool prev_a_pressed = false;
 
 void retro_init(void) { lr_retro_init(); }
 void retro_deinit(void) { lr_retro_deinit(); }
@@ -221,6 +223,35 @@ void lr_retro_run(void)
    }
 
    input_poll_cb();
+
+   // Check if A button is pressed
+   int16_t input_a = input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A);
+
+   if (input_a && !prev_a_pressed)
+   {
+      // Button was just pressed, toggle the FPS
+      struct retro_system_av_info av_info;
+      lr_retro_get_system_av_info(&av_info);
+
+      if (!is_50hz)
+      {
+         av_info.timing.fps = 50.0;
+         is_50hz = true;
+         log_cb(RETRO_LOG_INFO, "Switched to 50 Hz\n");
+      }
+      else
+      {
+         av_info.timing.fps = 60.0;
+         is_50hz = false;
+         log_cb(RETRO_LOG_INFO, "Switched to 60 Hz\n");
+      }
+
+      environ_cb(RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO, &av_info);
+   }
+
+   // Update the previous state of the A button
+   prev_a_pressed = input_a != 0;
+
    video_cb(frame_buf, FRAME_BUF_WIDTH, FRAME_BUF_HEIGHT, 2 * FRAME_BUF_WIDTH);
 }
 
