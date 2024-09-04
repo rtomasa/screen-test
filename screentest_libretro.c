@@ -24,11 +24,13 @@
 #include <math.h>
 
 #define FRAME_BUF_WIDTH 320
-#define FRAME_BUF_HEIGHT 240
+#define FRAME_BUF_HEIGHT_NTSC 240
+#define FRAME_BUF_HEIGHT_PAL 288
 
 static uint16_t *frame_buf;
 static bool is_50hz = false;
 static bool prev_a_pressed = false;
+static bool prev_b_pressed = false;
 
 void retro_init(void) { lr_retro_init(); }
 void retro_deinit(void) { lr_retro_deinit(); }
@@ -91,13 +93,25 @@ static void convert_to_rgb565(SDL_Surface *surface, uint16_t *buffer)
    }
 }
 
-static void load_bg()
+static void load_bg(bool is_50)
 {
-   SDL_Surface *bg_img = IMG_Load("./images/grid.png");
+   const char* image;
+   if (is_50)
+   {
+      image = "./images/grid_50.png";
+      frame_buf = (uint16_t *)calloc(FRAME_BUF_WIDTH * FRAME_BUF_HEIGHT_PAL, sizeof(uint16_t));
+      for (unsigned i = 0; i < (unsigned)(FRAME_BUF_WIDTH * FRAME_BUF_HEIGHT_PAL); i++)
+         frame_buf[i] = 4 << 5;
+   }
+   else
+   {
+      image = "./images/grid_60.png";
+      frame_buf = (uint16_t *)calloc(FRAME_BUF_WIDTH * FRAME_BUF_HEIGHT_NTSC, sizeof(uint16_t));
+      for (unsigned i = 0; i < (unsigned)(FRAME_BUF_WIDTH * FRAME_BUF_HEIGHT_NTSC); i++)
+         frame_buf[i] = 4 << 5;
+   }
 
-   frame_buf = (uint16_t *)calloc(FRAME_BUF_WIDTH * FRAME_BUF_HEIGHT, sizeof(uint16_t));
-   for (unsigned i = 0; i < (unsigned)(FRAME_BUF_WIDTH * FRAME_BUF_HEIGHT); i++)
-      frame_buf[i] = 4 << 5;
+   SDL_Surface *bg_img = IMG_Load(image);
 
    convert_to_rgb565(bg_img, frame_buf);
    SDL_FreeSurface(bg_img);
@@ -105,7 +119,7 @@ static void load_bg()
 
 void lr_retro_init(void)
 {
-   load_bg();
+   load_bg(false);
 }
 
 void lr_retro_deinit(void)
@@ -135,16 +149,25 @@ void lr_retro_get_system_info(struct retro_system_info *info)
    info->valid_extensions = "n/a"; /* Nothing. */
 }
 
-/* Doesn't really matter, but need something sane. */
 void lr_retro_get_system_av_info(struct retro_system_av_info *info)
 {
-   info->timing.fps = 60;
+   if (is_50hz)
+   {
+      info->timing.fps = 50.0;
+      info->geometry.base_height = FRAME_BUF_HEIGHT_PAL;
+      info->geometry.max_height = FRAME_BUF_HEIGHT_PAL;
+      info->geometry.aspect_ratio = (float)FRAME_BUF_WIDTH / (float)FRAME_BUF_HEIGHT_PAL;
+   }
+   else
+   {
+      info->timing.fps = 60.0;
+      info->geometry.base_height = FRAME_BUF_HEIGHT_NTSC;
+      info->geometry.max_height = FRAME_BUF_HEIGHT_NTSC;
+      info->geometry.aspect_ratio = (float)FRAME_BUF_WIDTH / (float)FRAME_BUF_HEIGHT_NTSC;
+   }
    info->timing.sample_rate = 48000.0;
    info->geometry.base_width = FRAME_BUF_WIDTH;
-   info->geometry.base_height = FRAME_BUF_HEIGHT;
-   info->geometry.max_width = FRAME_BUF_WIDTH;
-   info->geometry.max_height = FRAME_BUF_HEIGHT;
-   info->geometry.aspect_ratio = (float)FRAME_BUF_WIDTH / (float)FRAME_BUF_HEIGHT;
+   info->geometry.max_width = FRAME_BUF_WIDTH;   
 }
 
 void lr_retro_set_environment(retro_environment_t cb)
@@ -215,7 +238,7 @@ void lr_retro_run(void)
       log_cb(RETRO_LOG_INFO, "Variable updated\n");
 
       free(frame_buf);
-      load_bg();
+      load_bg(false);
 
       struct retro_system_av_info av_info;
       lr_retro_get_system_av_info(&av_info);
@@ -224,10 +247,11 @@ void lr_retro_run(void)
 
    input_poll_cb();
 
-   // Check if A button is pressed
+   // Check if A or B button are pressed
    int16_t input_a = input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A);
+   int16_t input_b = input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B);
 
-   if (input_a && !prev_a_pressed)
+   if ((input_a && !prev_a_pressed) || (input_b && !prev_b_pressed))
    {
       // Button was just pressed, toggle the FPS
       struct retro_system_av_info av_info;
@@ -236,23 +260,34 @@ void lr_retro_run(void)
       if (!is_50hz)
       {
          av_info.timing.fps = 50.0;
+         av_info.geometry.base_height = FRAME_BUF_HEIGHT_PAL;
+         av_info.geometry.max_height = FRAME_BUF_HEIGHT_PAL;
+         av_info.geometry.aspect_ratio = (float)FRAME_BUF_WIDTH / (float)FRAME_BUF_HEIGHT_PAL;
          is_50hz = true;
          log_cb(RETRO_LOG_INFO, "Switched to 50 Hz\n");
       }
       else
       {
          av_info.timing.fps = 60.0;
+         av_info.geometry.base_height = FRAME_BUF_HEIGHT_NTSC;
+         av_info.geometry.max_height = FRAME_BUF_HEIGHT_NTSC;
+         av_info.geometry.aspect_ratio = (float)FRAME_BUF_WIDTH / (float)FRAME_BUF_HEIGHT_NTSC;
          is_50hz = false;
          log_cb(RETRO_LOG_INFO, "Switched to 60 Hz\n");
       }
+      load_bg(is_50hz);
 
       environ_cb(RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO, &av_info);
    }
 
-   // Update the previous state of the A button
+   // Update the previous state of the A and B buttons
    prev_a_pressed = input_a != 0;
+   prev_b_pressed = input_b != 0;
 
-   video_cb(frame_buf, FRAME_BUF_WIDTH, FRAME_BUF_HEIGHT, 2 * FRAME_BUF_WIDTH);
+   if (is_50hz)
+      video_cb(frame_buf, FRAME_BUF_WIDTH, FRAME_BUF_HEIGHT_PAL, 2 * FRAME_BUF_WIDTH);
+   else
+      video_cb(frame_buf, FRAME_BUF_WIDTH, FRAME_BUF_HEIGHT_NTSC, 2 * FRAME_BUF_WIDTH);
 }
 
 /* This should never be called, it's only used as a placeholder. */
