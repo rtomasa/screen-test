@@ -3,8 +3,17 @@
 # Compiler
 CC := gcc
 
-# Flags for compiling and linking
-CFLAGS := -fPIC -Wall -Wextra -O2 `sdl2-config --cflags`
+# Debug flag
+DEBUG := 0
+
+# Adjust compiler flags based on debug mode
+ifeq ($(DEBUG), 1)
+   	CFLAGS := -fPIC -Wall -Wextra -O0 -g -DDEBUG -march=armv8-a `sdl2-config --cflags`
+else
+	CFLAGS := -fPIC -O3 -march=armv8-a -ftree-vectorize -fomit-frame-pointer -pipe `sdl2-config --cflags`
+endif
+
+# Flags for linking
 LDFLAGS := -shared `sdl2-config --libs` -lSDL2_gfx
 
 # Source and build directories
